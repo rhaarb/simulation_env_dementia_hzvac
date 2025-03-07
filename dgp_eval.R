@@ -20,7 +20,18 @@ simulate_covariates <- function(n) {
   )
 }
 
+# Parameter choice
 n = 1000000
+
+# Effects
+beta_age = 0.04
+beta_bmi = 0.01 
+beta_smoking_current = 0.02
+beta_smoking_past = 0.005
+beta_female = 0.1 # Females have higher baseline risk
+gamma_treatment = -0.2 # Main treatment effect
+gamma_female_treatment = -0.1
+baseline_log_odds = -4.6
 
 input_data <- simulate_covariates(n)
 
@@ -32,8 +43,8 @@ assign_treatment <- function(data, age_cutoff = 81, always_taker_prob = 0.03, co
       always_taker = ifelse(eligible == 0 & runif(n()) < always_taker_prob, 1, 0),  # Always-takers
       complier = ifelse(eligible == 1 & runif(n()) < complier_prob, 1, 0),  # Compliers among eligible
       treated = ifelse(always_taker == 1 | complier == 1, 1, 0)  # Final treatment assignment
-    ) %>%
-    select(-always_taker, -complier)  # Remove intermediate columns
+    ) #%>%
+    #select(-always_taker, -complier)  # Remove intermediate columns
   
   return(data)
 }
@@ -43,14 +54,14 @@ input_data_treatment %>% summary()
 
 # Simulating dementia risk
 simulate_dementia_risk <- function(data, 
-                                   beta_age = 0.05, 
-                                   beta_bmi = 0.02, 
-                                   beta_smoking_current = 0.02,
-                                   beta_smoking_past = 0.005,
-                                   beta_female = 0.3,  # Females have higher baseline risk
-                                   gamma_treatment = -0.2,  # Main treatment effect
-                                   gamma_female_treatment = -0.1,
-                                   baseline_log_odds = -4.6) {  # Extra reduction for females
+                                   beta_age , 
+                                   beta_bmi, 
+                                   beta_smoking_current,
+                                   beta_smoking_past,
+                                   beta_female,  # Females have higher baseline risk
+                                   gamma_treatment,  # Main treatment effect
+                                   gamma_female_treatment,
+                                   baseline_log_odds) {  # Extra reduction for females
   
   data <- data %>%
     mutate(
@@ -71,8 +82,12 @@ simulate_dementia_risk <- function(data,
   return(data)
 }
 
-data_treated <- simulate_dementia_risk(input_data_treatment)
-data_treated %>% filter(eligible == 1) %>% group_by(treated, gender) %>% summarise(mean_p_dementia = mean(p_dementia))
+data_treated <- simulate_dementia_risk(input_data_treatment, gamma_treatment = gamma_treatment, gamma_female_treatment = gamma_female_treatment, beta_age = beta_age,
+                                       beta_bmi = beta_bmi, beta_smoking_current = beta_smoking_current, beta_smoking_past = beta_smoking_past, beta_female = beta_female,
+                                       baseline_log_odds = baseline_log_odds)
+
+data_treated %>% filter(eligible == 1) %>% group_by(treated, gender) %>% summarise(mean_p_dementia = mean(p_dementia),
+                                                                                   mean_age = mean(age))
 
 # Calculate true LATE
 calculate_true_LATE <- function(data, gamma_treatment, gamma_female_treatment, beta_age, beta_bmi, beta_smoking_current, beta_smoking_past, beta_female, baseline_log_odds) {
@@ -102,9 +117,9 @@ calculate_true_LATE <- function(data, gamma_treatment, gamma_female_treatment, b
   return(LATE)
 }
 
-true_LATE <- calculate_true_LATE(data_treated, gamma_treatment = -0.2, gamma_female_treatment = -0.1, beta_age = 0.05,
-                                 beta_bmi = 0.02, beta_smoking_current = 0.02, beta_smoking_past = 0.005, beta_female = 0.3,
-                                 baseline_log_odds = -4.6)
+true_LATE <- calculate_true_LATE(data_treated, gamma_treatment = gamma_treatment, gamma_female_treatment = gamma_female_treatment, beta_age = beta_age,
+                                 beta_bmi = beta_bmi, beta_smoking_current = beta_smoking_current, beta_smoking_past = beta_smoking_past, beta_female = beta_female,
+                                 baseline_log_odds = baseline_log_odds)
 print(true_LATE)
 
 # Vizualise LATE
@@ -161,7 +176,7 @@ visualize_LATE <- function(data, gamma_treatment, gamma_female_treatment, beta_a
   scatter_plot <- ggplot(plot_data, aes(x = age, y = Dementia_Probability, color = Treatment_Status)) +
     geom_point(alpha = 0.3) +
     #geom_smooth(method = "loess") +
-    labs(title = "Dementia Probability by Age: Treated vs. Untreated Compliers",
+    labs(title = "COUNTERFACTUAL FOR COMPLIERS: \nDementia Probability by Age: Treated vs. Untreated",
          x = "Age", y = "Dementia Probability") +
     theme_minimal() +
     scale_color_manual(values = c("red", "blue"))
@@ -171,14 +186,17 @@ ggarrange(g1, scatter_plot, nrow = 2)
 }
 
 # Run the visualization function
-visualize_LATE(data_treated, gamma_treatment = -0.2, gamma_female_treatment = -0.1, beta_age = 0.05,
-               beta_bmi = 0.02, beta_smoking_current = 0.02, beta_smoking_past = 0.005, beta_female = 0.3,
-               baseline_log_odds = -4.6)
+visualize_LATE(data_treated, gamma_treatment = gamma_treatment, gamma_female_treatment = gamma_female_treatment, beta_age = beta_age,
+               beta_bmi = beta_bmi, beta_smoking_current = beta_smoking_current, beta_smoking_past = beta_smoking_past, beta_female = beta_female,
+               baseline_log_odds = baseline_log_odds)
 
 # Inference
 data_treated <- data_treated %>%
-  mutate(run_var = age - 81)
+  mutate(run_var = age - 81,
+         tria_weights = pmax(0, 1 - abs(run_var)/max(abs(run_var)))
+         )
 
+# Continuity based RD
 library(rdrobust)
 rdplot(y        = data_treated$dementia,
        x        = data_treated$run_var,
@@ -199,12 +217,82 @@ rdplot(y        = data_treated$dementia,
        x        = data_treated$run_var,
        c        = 0,
        nbins    = c(200, 200),
-       x.lim    = c(-20, 20),
+       x.lim    = c(-10, 10),
+       y.lim    = c(0.1, 0.4),
        h        = rd1$bws["h",1],
        p        = 1)
 
+# Local randomisation based RD
+library(rdlocrand)
+data_treated <- data_treated %>%
+  mutate(age_discrete = round(age, digits = 0),
+         run_var_discrete = age_discrete - 81)
+
+rdrandinf(Y      = data_treated$dementia,
+          R      = data_treated$run_var_discrete,
+          cutoff = 0,
+          fuzzy  = data_treated$treated,
+          p      = 1,
+          covariates = cbind(data_treated$BMI,
+                             data_treated$hypertension,
+                             #data_treated$smoking_status,
+                             data_treated$aspirin,
+                             data_treated$alcohol_history,
+                             data_treated$depression_history,
+                             data_treated$afib_history))
+
+# Instrumental variable fixed effect model
 library(fixest)
 
-feols(dementia ~ 1 | gender | treated*run_var ~ eligible*run_var,
+feols(dementia ~ 1 | treated*run_var ~ eligible*run_var,
       vcov = "hetero",
       data = data_treated)
+
+feols(dementia ~ 1 | treated*run_var ~ eligible*run_var,
+      vcov = "hetero",
+      weights = ~tria_weights,
+      data = data_treated)
+
+# Modified Poisson Regression for Binary Outcome
+library(rqlm)
+
+rqlm(dementia ~ eligible*run_var + BMI + hypertension + aspirin + alcohol_history + depression_history + afib_history,
+     data = data_treated,
+     family = "poisson",
+     cl = 0.95,
+     digits = 5)
+
+# Two-Stage Residual Inclusion (2SRI)
+library(fixest)
+
+first_stage <- feols(treated ~ eligible + BMI + hypertension + aspirin + alcohol_history + depression_history + afib_history,
+                     data = data_treated)
+
+data_treated[, "fs_residuals"] <- first_stage$residuals
+
+second_stage <- fepois(dementia ~ treated*run_var + BMI + hypertension + aspirin + alcohol_history + depression_history + afib_history + fs_residuals,
+                       data = data_treated,
+                       weights = ~tria_weights)
+
+summary(second_stage)
+
+# Percentage effect of treatment vis-a-vis baseline risk
+(percentage_treatment_effect <- (exp(second_stage$coeftable["treated", "Estimate"])-1))
+
+# Percentage points the treatment effect is
+baseline_risk <- data_treated %>% filter(treated == 0) %>% summarise(dem_mean = mean(dementia)) %>% as.numeric()
+baseline_risk*percentage_treatment_effect
+
+
+second_stage_logit <- feglm(dementia ~ treated*run_var + BMI + hypertension + aspirin + alcohol_history + depression_history + afib_history + fs_residuals,
+                            data = data_treated,
+                            weights = ~tria_weights,
+                            family = binomial("logit"))
+
+summary(second_stage_logit)
+(OR <- exp(second_stage_logit$coeftable["treated", "Estimate"]))
+probability <- (OR*baseline_risk) / (1+(OR-1)*baseline_risk)
+
+# Percentage points the treatment effect is
+probability - baseline_risk
+
