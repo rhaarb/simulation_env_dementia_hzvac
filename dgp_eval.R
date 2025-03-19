@@ -150,7 +150,7 @@ visualize_LATE <- function(data, gamma_treatment, gamma_female_treatment, beta_a
     filter(complier) %>%
     mutate(p_dementia_untreated = p_dementia_untreated,
            p_dementia_treated = p_dementia_treated) %>%
-    select(age, gender, p_dementia_untreated, p_dementia_treated) %>%
+    dplyr::select(age, gender, p_dementia_untreated, p_dementia_treated) %>%
     tidyr::pivot_longer(cols = starts_with("p_dementia"), 
                         names_to = "Treatment_Status", 
                         values_to = "Dementia_Probability") %>%
