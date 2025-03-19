@@ -39,7 +39,7 @@ input_data <- simulate_covariates(n)
 assign_treatment <- function(data, age_cutoff = 81, always_taker_prob = 0.03, complier_prob = 0.40) {
   data <- data %>%
     mutate(
-      eligible = ifelse(age >= age_cutoff, 1, 0),  # Eligibility based on age
+      eligible = ifelse(age <= age_cutoff, 1, 0),  # Eligibility based on age
       always_taker = ifelse(eligible == 0 & runif(n()) < always_taker_prob, 1, 0),  # Always-takers
       complier = ifelse(eligible == 1 & runif(n()) < complier_prob, 1, 0),  # Compliers among eligible
       treated = ifelse(always_taker == 1 | complier == 1, 1, 0)  # Final treatment assignment
@@ -192,7 +192,7 @@ visualize_LATE(data_treated, gamma_treatment = gamma_treatment, gamma_female_tre
 
 # Inference
 data_treated <- data_treated %>%
-  mutate(run_var = age - 81,
+  mutate(run_var = 81 - age,
          tria_weights = pmax(0, 1 - abs(run_var)/max(abs(run_var)))
          )
 
@@ -226,7 +226,7 @@ rdplot(y        = data_treated$dementia,
 library(rdlocrand)
 data_treated <- data_treated %>%
   mutate(age_discrete = round(age, digits = 0),
-         run_var_discrete = age_discrete - 81)
+         run_var_discrete = 81 - age_discrete)
 
 rdrandinf(Y      = data_treated$dementia,
           R      = data_treated$run_var_discrete,
